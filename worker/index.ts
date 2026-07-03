@@ -6,6 +6,7 @@ import { prisma } from "./db";
 const client = createClient()
 client.connect()
     .then(async () => {
+        console.log("Worker started, connected to Redis, waiting for submissions...");
         while(1) {
             const response = await client.rPop("problems");
             if (!response) {
@@ -28,17 +29,29 @@ client.connect()
                 const filePath = __dirname + "/code/a.cpp";
                 fs.writeFileSync(filePath, code);
                 const reponseCompiler = spawn("g++", [filePath, "-o", "./code/out"]);
+                let compileOutput = "";
+                let compileError = "";
+
+                reponseCompiler.stdout.on("data", (chunk) => {
+                    compileOutput += chunk.toString();
+                });
+                reponseCompiler.stderr.on("data", (chunk) => {
+                    compileError += chunk.toString();
+                });
+
                 let exitCodeCompiler = null;
                 await new Promise<void>(resolve => {
-                    reponseCompiler.on("exit", async (exitCode) => {
+                    reponseCompiler.on("close", async (exitCode) => {
                         exitCodeCompiler = exitCode;
                         if (exitCode !== 0) {
+                            const errMessage = compileError || compileOutput || "Compilation failed";
                             await prisma.submissions.update({
                                 where: {
                                     id: submissionId
                                 },
                                 data: {
                                     status: "Failure",
+                                    output: errMessage
                                 }
                             })
                         }
@@ -51,12 +64,18 @@ client.connect()
                 }
 
                 const response = spawn("./code/out");
+                let runtimeOutput = "";
+                let runtimeError = "";
+
                 response.stdout.on("data", (chunk) => {
-                    finalOutput += chunk.toString();
+                    runtimeOutput += chunk.toString();
+                })
+                response.stderr.on("data", (chunk) => {
+                    runtimeError += chunk.toString();
                 })
 
                 await new Promise<void>(resolve => {
-                    response.on("exit", async (exitCode) => {
+                    response.on("close", async (exitCode) => {
                         console.log(exitCode);
                         if (exitCode === 0) {
                             await prisma.submissions.update({
@@ -65,7 +84,7 @@ client.connect()
                                 },
                                 data: {
                                     status: "Success",
-                                    output: finalOutput
+                                    output: runtimeOutput
                                 }
                             })
                         } else {
@@ -75,6 +94,7 @@ client.connect()
                                 },
                                 data: {
                                     status: "Failure",
+                                    output: runtimeOutput + (runtimeError ? "\n" + runtimeError : "")
                                 }
                             })
                         }
@@ -90,11 +110,18 @@ client.connect()
                 console.log("Running users js code")
                 fs.writeFileSync(filePath, code);
                 const response = spawn("node", [filePath]);
+                let runtimeOutput = "";
+                let runtimeError = "";
+
                 response.stdout.on("data", (chunk) => {
-                    finalOutput += chunk.toString();
+                    runtimeOutput += chunk.toString();
                 })
+                response.stderr.on("data", (chunk) => {
+                    runtimeError += chunk.toString();
+                })
+
                 await new Promise<void>(resolve => {
-                    response.on("exit", async (exitCode) => {
+                    response.on("close", async (exitCode) => {
                         if (exitCode === 0) {
                             await prisma.submissions.update({
                                 where: {
@@ -102,7 +129,7 @@ client.connect()
                                 },
                                 data: {
                                     status: "Success",
-                                    output: finalOutput
+                                    output: runtimeOutput
                                 }
                             })
                         } else {
@@ -112,6 +139,7 @@ client.connect()
                                 },
                                 data: {
                                     status: "Failure",
+                                    output: runtimeOutput + (runtimeError ? "\n" + runtimeError : "")
                                 }
                             })
                         }
@@ -122,14 +150,22 @@ client.connect()
 
             if (language === "py") {
                 const filePath = __dirname + "/code/a.py";
-                console.log("Running users js code")
+                console.log("Running users py code")
                 fs.writeFileSync(filePath, code);
-                const response = spawn("python3", [filePath]);
+                const pythonCmd = process.platform === "win32" ? "python" : "python3";
+                const response = spawn(pythonCmd, [filePath]);
+                let runtimeOutput = "";
+                let runtimeError = "";
+
                 response.stdout.on("data", (chunk) => {
-                    finalOutput += chunk.toString();
+                    runtimeOutput += chunk.toString();
                 })
+                response.stderr.on("data", (chunk) => {
+                    runtimeError += chunk.toString();
+                })
+
                 await new Promise<void>(resolve => {
-                    response.on("exit", async (exitCode) => {
+                    response.on("close", async (exitCode) => {
                         if (exitCode === 0) {
                             await prisma.submissions.update({
                                 where: {
@@ -137,7 +173,7 @@ client.connect()
                                 },
                                 data: {
                                     status: "Success",
-                                    output: finalOutput
+                                    output: runtimeOutput
                                 }
                             })
                         } else {
@@ -147,6 +183,7 @@ client.connect()
                                 },
                                 data: {
                                     status: "Failure",
+                                    output: runtimeOutput + (runtimeError ? "\n" + runtimeError : "")
                                 }
                             })
                         }

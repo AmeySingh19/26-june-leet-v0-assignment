@@ -44,4 +44,6 @@ app.get("/submission/:submissionId", async (req, res) => {
 })
 
 
-app.listen(3000);
+app.listen(3000, () => {
+    console.log("Backend server listening on port 3000");
+});
